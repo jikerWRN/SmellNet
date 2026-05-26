@@ -1,0 +1,104 @@
+# --- Datasets & paper assets you host elsewhere (e.g. Hugging Face) ---
+# Users must download these after cloning — they are NOT committed to Git.
+data/
+base_data/
+ICLR_data/   # legacy folder name; use base_data/
+gcms_processed/
+gcms_data/
+mixture_data/
+text_data/
+
+# Large / derived tables and embeddings (download from HF after clone)
+*.npy
+*.npz
+*.parquet
+full_gcms_dataframe.csv
+processed_full_gcms_dataframe.csv
+# Raw or duplicated exports from acquisition scripts
+data_collection/*.csv
+data_stats/
+
+# --- Training / experiment outputs (regenerate locally) ---
+logs/
+runs/
+checkpoints/
+wandb/
+mlruns/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Model weights & serialized checkpoints
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.bin
+*.joblib
+*.pickle
+*.pkl
+
+# --- Python packaging & environments ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+ENV/
+.env
+.env.*
+!.env.example
+
+# Jupyter
+.ipynb_checkpoints/
+
+# --- Tools & editors (machine-local; remove from git if you already track them) ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- OS junk ---
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# --- Optional large vendor drops under Arduino (prefer submodule or doc link) ---
+Arduino/**/data/*.zip
+
+# --- Hugging Face / dataset tooling caches if stored inside the repo ---
+.huggingface/
+hf_cache/
+datasets_cache/
+
+# --- Misc scratch ---
+tmp/
+scratch/
+*.log
+
+# Root-level manuscript PDFs (often large); keep paper figures under analysis/ or data_stats/
+/iclr*.pdf
+/ICLR*.pdf
