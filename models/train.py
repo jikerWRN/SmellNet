@@ -40,12 +40,13 @@ def train(
     if logger:
         logger.info(f"Training on device: {device}")
 
+    global_step = 0
     for epoch in range(1, epochs + 1):
         total_loss = 0.0
         total_correct = 0
         total_examples = 0
 
-        for batch in train_loader:
+        for batch_idx, batch in enumerate(train_loader, start=1):
             # Unpack (x, y) or (x, y, lengths)
             if isinstance(batch, (tuple, list)) and len(batch) == 3:
                 batch_x, batch_y, lengths = batch
@@ -80,13 +81,30 @@ def train(
             total_loss += loss.item() * bs
             total_correct += (logits.argmax(dim=1) == batch_y).sum().item()
             total_examples += bs
+            global_step += 1
+
+            if eval_callback is not None:
+                eval_callback(
+                    epoch=epoch,
+                    model=model,
+                    batch_idx=batch_idx,
+                    global_step=global_step,
+                    phase="batch",
+                )
+                model.train()
 
         avg_loss = total_loss / max(total_examples, 1)
         acc = 100.0 * total_correct / max(total_examples, 1)
         msg = f"Epoch {epoch:02d} | loss {avg_loss:.4f} | acc {acc:.2f}%"
         (logger.info(msg) if logger else print(msg))
         if eval_callback is not None:
-            eval_callback(epoch, model)
+            eval_callback(
+                epoch=epoch,
+                model=model,
+                batch_idx=len(train_loader),
+                global_step=global_step,
+                phase="epoch",
+            )
             model.train()
 
 
@@ -135,11 +153,12 @@ def contrastive_train(
             return x, l
         return m, None
 
+    global_step = 0
     for epoch in range(1, epochs + 1):
         total_loss = 0.0
         num_batches = 0
 
-        for batch in dataloader:
+        for batch_idx, batch in enumerate(dataloader, start=1):
             # Unpack GCMS and Sensor (with optional lengths)
             x_gcms, x_sensor = batch
             x_gcms, len_g = _unpack_modality(x_gcms)
@@ -173,11 +192,31 @@ def contrastive_train(
 
             total_loss += loss.item()
             num_batches += 1
+            global_step += 1
+
+            if eval_callback is not None:
+                eval_callback(
+                    epoch=epoch,
+                    gcms_encoder=gcms_encoder,
+                    sensor_encoder=sensor_encoder,
+                    batch_idx=batch_idx,
+                    global_step=global_step,
+                    phase="batch",
+                )
+                gcms_encoder.train()
+                sensor_encoder.train()
 
         avg = total_loss / max(num_batches, 1)
         (logger.info(f"Epoch {epoch:03d} | contrastive loss {avg:.4f}")
          if logger else print(f"Epoch {epoch:03d} | contrastive loss {avg:.4f}"))
         if eval_callback is not None:
-            eval_callback(epoch, gcms_encoder, sensor_encoder)
+            eval_callback(
+                epoch=epoch,
+                gcms_encoder=gcms_encoder,
+                sensor_encoder=sensor_encoder,
+                batch_idx=num_batches,
+                global_step=global_step,
+                phase="epoch",
+            )
             gcms_encoder.train()
             sensor_encoder.train()

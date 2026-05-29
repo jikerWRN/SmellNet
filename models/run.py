@@ -75,8 +75,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--eval-every",
         type=int,
+        default=10,
+        help="Evaluate every N epochs during training. Use 0 for final-only evaluation.",
+    )
+    p.add_argument(
+        "--eval-every-batches",
+        type=int,
         default=0,
-        help="Evaluate every N epochs during training. 0 keeps the original final-only evaluation.",
+        help="Evaluate every N training batches by global batch step. 0 disables batch-level evaluation.",
     )
 
     # Paths
@@ -502,6 +508,12 @@ def should_eval_epoch(epoch: int, total_epochs: int, eval_every: int) -> bool:
     return (epoch % eval_every == 0) or (epoch == total_epochs)
 
 
+def should_eval_batch(global_step: int, eval_every_batches: int) -> bool:
+    if eval_every_batches <= 0:
+        return False
+    return global_step > 0 and global_step % eval_every_batches == 0
+
+
 
 # ----------------------- Data prep -----------------------
 def build_sliding_data(
@@ -605,7 +617,14 @@ def main():
             model = get_model(spec.model, num_features=C, num_classes=K, window_size=spec.window_size, channel_last=True)
             eval_state = {"results": None}
 
-            def log_classification_eval(epoch: int | None, eval_model: nn.Module) -> dict:
+            def log_classification_eval(
+                epoch: int | None,
+                eval_model: nn.Module,
+                *,
+                batch_idx: int | None = None,
+                global_step: int | None = None,
+                phase: str = "final",
+            ) -> dict:
                 results = evaluate(
                     eval_model, test_loader,
                     device=device, dtype=dtype,
@@ -618,6 +637,9 @@ def main():
                     "cutoff": getattr(spec, "fft_cutoff", None),
                     "gradient": getattr(spec, "gradient", None),
                     "eval_epoch": epoch,
+                    "eval_batch": batch_idx,
+                    "eval_global_step": global_step,
+                    "eval_phase": phase,
                 }, separators=(',', ':'), sort_keys=True)
                 spec_csv.write(stage="eval", epoch=epoch, acc1=results.get("acc@1"), acc5=results.get("acc@5"), extra=extra)
                 append_results_jsonl(
@@ -625,20 +647,26 @@ def main():
                     dataset=dataset_info,
                     checkpoint=checkpoint_path,
                     eval_epoch=epoch,
+                    eval_batch=batch_idx,
+                    eval_global_step=global_step,
+                    eval_phase=phase,
                 )
                 eval_state["results"] = results
                 return results
 
-            def classification_eval_callback(epoch: int, eval_model: nn.Module):
-                if should_eval_epoch(epoch, spec.epochs, args.eval_every):
-                    log_classification_eval(epoch, eval_model)
+            def classification_eval_callback(*, epoch: int, model: nn.Module, batch_idx: int, global_step: int, phase: str):
+                if phase == "batch":
+                    if should_eval_batch(global_step, args.eval_every_batches):
+                        log_classification_eval(epoch, model, batch_idx=batch_idx, global_step=global_step, phase=phase)
+                elif args.eval_every_batches <= 0 and should_eval_epoch(epoch, spec.epochs, args.eval_every):
+                    log_classification_eval(epoch, model, batch_idx=batch_idx, global_step=global_step, phase=phase)
 
             train(
                 model, train_loader,
                 epochs=spec.epochs, lr=spec.lr, device=device, dtype=dtype,
-                eval_callback=classification_eval_callback if args.eval_every > 0 else None,
+                eval_callback=classification_eval_callback if (args.eval_every > 0 or args.eval_every_batches > 0) else None,
             )
-            results = eval_state["results"] or log_classification_eval(spec.epochs, model)
+            results = eval_state["results"] or log_classification_eval(spec.epochs, model, phase="final")
 
         else:
             # ====== Contrastive path ======
@@ -656,7 +684,15 @@ def main():
             gcms_encoder = get_gcms_encoder(in_features=Dg, embedding_dim=256)
             eval_state = {"results": None}
 
-            def log_contrastive_eval(epoch: int | None, eval_gcms_encoder: nn.Module, eval_sensor_encoder: nn.Module) -> dict:
+            def log_contrastive_eval(
+                epoch: int | None,
+                eval_gcms_encoder: nn.Module,
+                eval_sensor_encoder: nn.Module,
+                *,
+                batch_idx: int | None = None,
+                global_step: int | None = None,
+                phase: str = "final",
+            ) -> dict:
                 results = evaluate_contrastive(
                     eval_gcms_encoder, eval_sensor_encoder,
                     gcms_data=gcms_scaled,
@@ -672,6 +708,9 @@ def main():
                     "cutoff": getattr(spec, "fft_cutoff", None),
                     "gradient": getattr(spec, "gradient", None),
                     "eval_epoch": epoch,
+                    "eval_batch": batch_idx,
+                    "eval_global_step": global_step,
+                    "eval_phase": phase,
                 }, separators=(',', ':'), sort_keys=True)
                 spec_csv.write(stage="eval_contrastive", epoch=epoch, acc1=results.get("acc@1"), acc5=results.get("acc@5"), extra=extra)
                 append_results_jsonl(
@@ -679,30 +718,43 @@ def main():
                     dataset=dataset_info,
                     checkpoint=checkpoint_path,
                     eval_epoch=epoch,
+                    eval_batch=batch_idx,
+                    eval_global_step=global_step,
+                    eval_phase=phase,
                 )
                 eval_state["results"] = results
                 return results
 
-            def contrastive_eval_callback(epoch: int, eval_gcms_encoder: nn.Module, eval_sensor_encoder: nn.Module):
-                if should_eval_epoch(epoch, spec.epochs, args.eval_every):
-                    log_contrastive_eval(epoch, eval_gcms_encoder, eval_sensor_encoder)
+            def contrastive_eval_callback(
+                *,
+                epoch: int,
+                gcms_encoder: nn.Module,
+                sensor_encoder: nn.Module,
+                batch_idx: int,
+                global_step: int,
+                phase: str,
+            ):
+                if phase == "batch":
+                    if should_eval_batch(global_step, args.eval_every_batches):
+                        log_contrastive_eval(
+                            epoch, gcms_encoder, sensor_encoder,
+                            batch_idx=batch_idx, global_step=global_step, phase=phase,
+                        )
+                elif args.eval_every_batches <= 0 and should_eval_epoch(epoch, spec.epochs, args.eval_every):
+                    log_contrastive_eval(
+                        epoch, gcms_encoder, sensor_encoder,
+                        batch_idx=batch_idx, global_step=global_step, phase=phase,
+                    )
 
             # Train encoders
             contrastive_train(
                 gcms_encoder, sensor_encoder, train_loader,
                 epochs=spec.epochs, lr=spec.lr, device=device, dtype=dtype,
-                eval_callback=contrastive_eval_callback if args.eval_every > 0 else None,
+                eval_callback=contrastive_eval_callback if (args.eval_every > 0 or args.eval_every_batches > 0) else None,
             )
 
-            # Evaluate (window-level)
-            results = eval_state["results"] or evaluate_contrastive(
-                gcms_encoder, sensor_encoder,
-                gcms_data=gcms_scaled,                               # (N_g, Dg)
-                sensor_data=torch.from_numpy(Xte_np),           # (N_s, T, C)
-                sensor_labels=torch.from_numpy(yte_np),         # (N_s,)
-                device=device, dtype=dtype,
-                ingredient_to_category=ingredient_to_category,   # <— add
-                class_names=le.classes_,   
+            results = eval_state["results"] or log_contrastive_eval(
+                spec.epochs, gcms_encoder, sensor_encoder, phase="final"
             )
 
         if args.ablate_channels:

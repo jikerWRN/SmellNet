@@ -14,6 +14,8 @@ for lr in 0.0003 0.001 0.003; do
       --batch-size 32 \
       --lr "$lr" \
       --seed "$seed" \
+      --eval-every 0 \
+      --eval-every-batches 10 \
       --run-name-prefix "transformer_lr${lr}_seed${seed}"
   done
 done
