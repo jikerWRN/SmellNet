@@ -15,6 +15,11 @@ import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
+try:
+    import wandb
+except ImportError:
+    wandb = None
+
 
 from models import Transformer, GCMSMLPEncoder, LSTMNet, MLPClassifier, CNN1DClassifier
 
@@ -101,6 +106,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--run-name-prefix", type=str, default="")
     p.add_argument("--log-dir", type=str, default="./runs")
     p.add_argument("--save-dir", type=str, default="./checkpoints")
+    p.add_argument("--wandb-project", type=str, default="SMELLNet")
+    p.add_argument("--wandb-dir", type=str, default="./wandb")
     p.add_argument("--stride", type=int, default=None, help="Sliding stride (default: window//2)")
     p.add_argument("--dtype", type=str, default="float32", choices=["float32", "float64"])
 
@@ -514,6 +521,40 @@ def should_eval_batch(global_step: int, eval_every_batches: int) -> bool:
     return global_step > 0 and global_step % eval_every_batches == 0
 
 
+def save_checkpoint_if_best(
+    *,
+    results: dict,
+    best_state: dict,
+    metric: str,
+    path: Path,
+    payload: dict,
+) -> bool:
+    value = results.get(metric)
+    if value is None:
+        return False
+    value = float(value)
+    if value <= best_state.get(metric, float("-inf")):
+        return False
+    best_state[metric] = value
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({**payload, "best_metric": metric, "best_value": value}, path)
+    return True
+
+
+def wandb_log_eval(wandb_run, results: dict, *, epoch: int | None, batch_idx: int | None, global_step: int | None):
+    if wandb_run is None:
+        return
+    payload = {
+        "eval/acc@1": float(results.get("acc@1", 0.0)),
+        "eval/acc@2": float(results.get("acc@2", 0.0)),
+    }
+    step = global_step if global_step is not None else epoch
+    if step is None:
+        wandb_run.log(payload)
+    else:
+        wandb_run.log(payload, step=int(step))
+
+
 
 # ----------------------- Data prep -----------------------
 def build_sliding_data(
@@ -544,6 +585,18 @@ def main():
         run_name = _make_run_name(args.run_name_prefix, spec)
         run_dir = log_root / run_name
         run_dir.mkdir(parents=True, exist_ok=True)
+
+        if wandb is None:
+            raise RuntimeError("wandb is required for offline metric logging. Install it with `pip install wandb`.")
+        Path(args.wandb_dir).mkdir(parents=True, exist_ok=True)
+        wandb_run = wandb.init(
+            project=args.wandb_project,
+            name=run_name,
+            mode="offline",
+            dir=args.wandb_dir,
+            config=_jsonable(_spec_to_dict(spec)),
+            settings=wandb.Settings(_disable_stats=True),
+        )
 
         # per-spec csv
         spec_csv = SpecCSV(run_dir, spec)
@@ -611,6 +664,9 @@ def main():
                         "T": int(Xtr_np.shape[1]), "C": int(Xtr_np.shape[2]),
                         "classes": int(K)}
         checkpoint_path = str((Path(args.save_dir) / f"{run_name}.pt").resolve())
+        best_acc1_path = Path(args.save_dir) / f"{run_name}-best_acc1.pt"
+        best_acc5_path = Path(args.save_dir) / f"{run_name}-best_acc5.pt"
+        best_state = {"acc@1": float("-inf"), "acc@5": float("-inf")}
 
         if not spec.contrastive:
             # ====== Classification path ======
@@ -628,8 +684,31 @@ def main():
                 results = evaluate(
                     eval_model, test_loader,
                     device=device, dtype=dtype,
+                    topk=(1, 2, 5),
                     ingredient_to_category=ingredient_to_category,
                     class_names=le.classes_,
+                )
+                wandb_log_eval(wandb_run, results, epoch=epoch, batch_idx=batch_idx, global_step=global_step)
+                checkpoint_payload = {
+                    "model_state_dict": eval_model.state_dict(),
+                    "model": spec.model,
+                    "contrastive": False,
+                    "epoch": epoch,
+                    "batch_idx": batch_idx,
+                    "global_step": global_step,
+                    "phase": phase,
+                    "spec": _jsonable(_spec_to_dict(spec)),
+                    "dataset": dataset_info,
+                    "class_names": list(le.classes_),
+                    "results": _jsonable(results),
+                }
+                saved_best_acc1 = save_checkpoint_if_best(
+                    results=results, best_state=best_state, metric="acc@1",
+                    path=best_acc1_path, payload=checkpoint_payload,
+                )
+                saved_best_acc5 = save_checkpoint_if_best(
+                    results=results, best_state=best_state, metric="acc@5",
+                    path=best_acc5_path, payload=checkpoint_payload,
                 )
                 extra = json.dumps({
                     "per_category": results.get("per_category", {}),
@@ -640,6 +719,12 @@ def main():
                     "eval_batch": batch_idx,
                     "eval_global_step": global_step,
                     "eval_phase": phase,
+                    "best_acc1": best_state["acc@1"],
+                    "best_acc5": best_state["acc@5"],
+                    "saved_best_acc1": saved_best_acc1,
+                    "saved_best_acc5": saved_best_acc5,
+                    "best_acc1_checkpoint": str(best_acc1_path.resolve()),
+                    "best_acc5_checkpoint": str(best_acc5_path.resolve()),
                 }, separators=(',', ':'), sort_keys=True)
                 spec_csv.write(stage="eval", epoch=epoch, acc1=results.get("acc@1"), acc5=results.get("acc@5"), extra=extra)
                 append_results_jsonl(
@@ -650,6 +735,12 @@ def main():
                     eval_batch=batch_idx,
                     eval_global_step=global_step,
                     eval_phase=phase,
+                    best_acc1=best_state["acc@1"],
+                    best_acc5=best_state["acc@5"],
+                    saved_best_acc1=saved_best_acc1,
+                    saved_best_acc5=saved_best_acc5,
+                    best_acc1_checkpoint=str(best_acc1_path.resolve()),
+                    best_acc5_checkpoint=str(best_acc5_path.resolve()),
                 )
                 eval_state["results"] = results
                 return results
@@ -699,8 +790,32 @@ def main():
                     sensor_data=torch.from_numpy(Xte_np),
                     sensor_labels=torch.from_numpy(yte_np),
                     device=device, dtype=dtype,
+                    topk=(1, 2, 5),
                     ingredient_to_category=ingredient_to_category,
                     class_names=le.classes_,
+                )
+                wandb_log_eval(wandb_run, results, epoch=epoch, batch_idx=batch_idx, global_step=global_step)
+                checkpoint_payload = {
+                    "sensor_encoder_state_dict": eval_sensor_encoder.state_dict(),
+                    "gcms_encoder_state_dict": eval_gcms_encoder.state_dict(),
+                    "model": spec.model,
+                    "contrastive": True,
+                    "epoch": epoch,
+                    "batch_idx": batch_idx,
+                    "global_step": global_step,
+                    "phase": phase,
+                    "spec": _jsonable(_spec_to_dict(spec)),
+                    "dataset": dataset_info,
+                    "class_names": list(le.classes_),
+                    "results": _jsonable(results),
+                }
+                saved_best_acc1 = save_checkpoint_if_best(
+                    results=results, best_state=best_state, metric="acc@1",
+                    path=best_acc1_path, payload=checkpoint_payload,
+                )
+                saved_best_acc5 = save_checkpoint_if_best(
+                    results=results, best_state=best_state, metric="acc@5",
+                    path=best_acc5_path, payload=checkpoint_payload,
                 )
                 extra = json.dumps({
                     "per_category": results.get("per_category", {}),
@@ -711,6 +826,12 @@ def main():
                     "eval_batch": batch_idx,
                     "eval_global_step": global_step,
                     "eval_phase": phase,
+                    "best_acc1": best_state["acc@1"],
+                    "best_acc5": best_state["acc@5"],
+                    "saved_best_acc1": saved_best_acc1,
+                    "saved_best_acc5": saved_best_acc5,
+                    "best_acc1_checkpoint": str(best_acc1_path.resolve()),
+                    "best_acc5_checkpoint": str(best_acc5_path.resolve()),
                 }, separators=(',', ':'), sort_keys=True)
                 spec_csv.write(stage="eval_contrastive", epoch=epoch, acc1=results.get("acc@1"), acc5=results.get("acc@5"), extra=extra)
                 append_results_jsonl(
@@ -721,6 +842,12 @@ def main():
                     eval_batch=batch_idx,
                     eval_global_step=global_step,
                     eval_phase=phase,
+                    best_acc1=best_state["acc@1"],
+                    best_acc5=best_state["acc@5"],
+                    saved_best_acc1=saved_best_acc1,
+                    saved_best_acc5=saved_best_acc5,
+                    best_acc1_checkpoint=str(best_acc1_path.resolve()),
+                    best_acc5_checkpoint=str(best_acc5_path.resolve()),
                 )
                 eval_state["results"] = results
                 return results
@@ -811,7 +938,7 @@ def main():
             print("\nChannel ablation (Δacc@1, larger = more important):")
             for name, d in drops:
                 print(f"  {name:>8s}: +{d:.2f} pts")
-        elif spec.contrastive and args.eval_every <= 0:
+        elif spec.contrastive and args.eval_every <= 0 and args.eval_every_batches <= 0:
             spec_csv.write(stage="eval_contrastive", acc1=results.get("acc@1"), acc5=results.get("acc@5"), extra = json.dumps({
                 "per_category": results.get("per_category", {}),
                 "fft": getattr(spec, "fft", False),
@@ -824,6 +951,8 @@ def main():
                 dataset=dataset_info,
                 checkpoint=checkpoint_path
             )
+
+        wandb_run.finish()
 
 if __name__ == "__main__":
     main()

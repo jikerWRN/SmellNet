@@ -5,6 +5,9 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO/models"
 seed="${seed:-42}"
+eval_every_batches="${eval_every_batches:-10}"
+wandb_project="${wandb_project:-SMELLNet}"
+wandb_dir="${wandb_dir:-./wandb}"
 
 for lr in 0.0003 0.001 0.003; do
   for m in mlp cnn lstm transformer; do
@@ -18,6 +21,8 @@ for lr in 0.0003 0.001 0.003; do
           --models "$m" --contrastive on --gradients "$g" --window-sizes "$w" \
           --seed "${seed}" \
           --epochs 90 --batch-size 32 --lr "$lr" \
+          --eval-every 0 --eval-every-batches "$eval_every_batches" \
+          --wandb-project "$wandb_project" --wandb-dir "$wandb_dir" \
           --run-name-prefix "SEL_grad${g}_w${w}_lr${lr}" \
           --log-dir "./contrastive_runs_w${w}_seed${seed}"
       done
