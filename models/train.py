@@ -17,6 +17,7 @@ def train(
     noise_fn=None,                 # callable or None, e.g., lambda x: apply_noise_injection(x, 0.05)
     feature_dropout_fn=None,       # callable or None, e.g., apply_random_feature_dropout
     dtype=torch.float64,
+    eval_callback=None,
 ):
     """
     Expects each batch to be either:
@@ -84,6 +85,9 @@ def train(
         acc = 100.0 * total_correct / max(total_examples, 1)
         msg = f"Epoch {epoch:02d} | loss {avg_loss:.4f} | acc {acc:.2f}%"
         (logger.info(msg) if logger else print(msg))
+        if eval_callback is not None:
+            eval_callback(epoch, model)
+            model.train()
 
 
 def contrastive_train(
@@ -101,6 +105,7 @@ def contrastive_train(
     noise_fn=None,                 # augmentation for sensor stream
     feature_dropout_fn=None,
     dtype=torch.float64,
+    eval_callback=None,
 ):
     """
     Expects each batch to be one of:
@@ -172,3 +177,7 @@ def contrastive_train(
         avg = total_loss / max(num_batches, 1)
         (logger.info(f"Epoch {epoch:03d} | contrastive loss {avg:.4f}")
          if logger else print(f"Epoch {epoch:03d} | contrastive loss {avg:.4f}"))
+        if eval_callback is not None:
+            eval_callback(epoch, gcms_encoder, sensor_encoder)
+            gcms_encoder.train()
+            sensor_encoder.train()

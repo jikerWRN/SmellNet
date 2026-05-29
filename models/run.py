@@ -72,6 +72,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--device", type=str, default=None, choices=["cpu", "cuda", None])
+    p.add_argument(
+        "--eval-every",
+        type=int,
+        default=0,
+        help="Evaluate every N epochs during training. 0 keeps the original final-only evaluation.",
+    )
 
     # Paths
     p.add_argument("--train-dir", type=str, required=True, help="Training CSV folders (sensor).")
@@ -490,6 +496,12 @@ def apply_standardizer(X: np.ndarray, ss: StandardScaler | None) -> np.ndarray:
     return flat.reshape(N, T, C).astype(np.float32, copy=False)
 
 
+def should_eval_epoch(epoch: int, total_epochs: int, eval_every: int) -> bool:
+    if eval_every <= 0:
+        return False
+    return (epoch % eval_every == 0) or (epoch == total_epochs)
+
+
 
 # ----------------------- Data prep -----------------------
 def build_sliding_data(
@@ -582,28 +594,51 @@ def main():
         # ---------- DataLoaders ----------
         train_loader = DataLoader(TensorDataset(torch.from_numpy(Xtr_np), torch.from_numpy(ytr_np)), batch_size=spec.batch_size, shuffle=True, drop_last=False)
         test_loader  = DataLoader(TensorDataset(torch.from_numpy(Xte_np), torch.from_numpy(yte_np)), batch_size=spec.batch_size, shuffle=False, drop_last=False)
+        dataset_info = {"train_windows": int(Xtr_np.shape[0]),
+                        "test_windows": int(Xte_np.shape[0]),
+                        "T": int(Xtr_np.shape[1]), "C": int(Xtr_np.shape[2]),
+                        "classes": int(K)}
+        checkpoint_path = str((Path(args.save_dir) / f"{run_name}.pt").resolve())
 
         if not spec.contrastive:
             # ====== Classification path ======
             model = get_model(spec.model, num_features=C, num_classes=K, window_size=spec.window_size, channel_last=True)
-            train(model, train_loader, epochs=spec.epochs, lr=spec.lr, device=device, dtype=dtype)
-            results = evaluate(model, test_loader, device=device, dtype=dtype, ingredient_to_category=ingredient_to_category, class_names=le.classes_)
+            eval_state = {"results": None}
 
-            spec_csv.write(stage="eval", acc1=results.get("acc@1"), acc5=results.get("acc@5"), extra = json.dumps({
-                "per_category": results.get("per_category", {}),
-                "fft": getattr(spec, "fft", False),
-                "cutoff": getattr(spec, "fft_cutoff", None),
-                "gradient": getattr(spec, "gradient", None),
-            }, separators=(',', ':'), sort_keys=True))
+            def log_classification_eval(epoch: int | None, eval_model: nn.Module) -> dict:
+                results = evaluate(
+                    eval_model, test_loader,
+                    device=device, dtype=dtype,
+                    ingredient_to_category=ingredient_to_category,
+                    class_names=le.classes_,
+                )
+                extra = json.dumps({
+                    "per_category": results.get("per_category", {}),
+                    "fft": getattr(spec, "fft", False),
+                    "cutoff": getattr(spec, "fft_cutoff", None),
+                    "gradient": getattr(spec, "gradient", None),
+                    "eval_epoch": epoch,
+                }, separators=(',', ':'), sort_keys=True)
+                spec_csv.write(stage="eval", epoch=epoch, acc1=results.get("acc@1"), acc5=results.get("acc@5"), extra=extra)
+                append_results_jsonl(
+                    run_dir, spec, results=results,
+                    dataset=dataset_info,
+                    checkpoint=checkpoint_path,
+                    eval_epoch=epoch,
+                )
+                eval_state["results"] = results
+                return results
 
-            append_results_jsonl(
-                run_dir, spec, results=results,
-                dataset={"train_windows": int(Xtr_np.shape[0]),
-                        "test_windows": int(Xte_np.shape[0]),
-                        "T": int(Xtr_np.shape[1]), "C": int(Xtr_np.shape[2]),
-                        "classes": int(K)},
-                checkpoint=str((Path(args.save_dir) / f"{run_name}.pt").resolve())
+            def classification_eval_callback(epoch: int, eval_model: nn.Module):
+                if should_eval_epoch(epoch, spec.epochs, args.eval_every):
+                    log_classification_eval(epoch, eval_model)
+
+            train(
+                model, train_loader,
+                epochs=spec.epochs, lr=spec.lr, device=device, dtype=dtype,
+                eval_callback=classification_eval_callback if args.eval_every > 0 else None,
             )
+            results = eval_state["results"] or log_classification_eval(spec.epochs, model)
 
         else:
             # ====== Contrastive path ======
@@ -619,11 +654,48 @@ def main():
             
             Dg = gcms_scaled.shape[1]
             gcms_encoder = get_gcms_encoder(in_features=Dg, embedding_dim=256)
+            eval_state = {"results": None}
+
+            def log_contrastive_eval(epoch: int | None, eval_gcms_encoder: nn.Module, eval_sensor_encoder: nn.Module) -> dict:
+                results = evaluate_contrastive(
+                    eval_gcms_encoder, eval_sensor_encoder,
+                    gcms_data=gcms_scaled,
+                    sensor_data=torch.from_numpy(Xte_np),
+                    sensor_labels=torch.from_numpy(yte_np),
+                    device=device, dtype=dtype,
+                    ingredient_to_category=ingredient_to_category,
+                    class_names=le.classes_,
+                )
+                extra = json.dumps({
+                    "per_category": results.get("per_category", {}),
+                    "fft": getattr(spec, "fft", False),
+                    "cutoff": getattr(spec, "fft_cutoff", None),
+                    "gradient": getattr(spec, "gradient", None),
+                    "eval_epoch": epoch,
+                }, separators=(',', ':'), sort_keys=True)
+                spec_csv.write(stage="eval_contrastive", epoch=epoch, acc1=results.get("acc@1"), acc5=results.get("acc@5"), extra=extra)
+                append_results_jsonl(
+                    run_dir, spec, results=results,
+                    dataset=dataset_info,
+                    checkpoint=checkpoint_path,
+                    eval_epoch=epoch,
+                )
+                eval_state["results"] = results
+                return results
+
+            def contrastive_eval_callback(epoch: int, eval_gcms_encoder: nn.Module, eval_sensor_encoder: nn.Module):
+                if should_eval_epoch(epoch, spec.epochs, args.eval_every):
+                    log_contrastive_eval(epoch, eval_gcms_encoder, eval_sensor_encoder)
+
             # Train encoders
-            contrastive_train(gcms_encoder, sensor_encoder, train_loader, epochs=spec.epochs, lr=spec.lr, device=device, dtype=dtype)
+            contrastive_train(
+                gcms_encoder, sensor_encoder, train_loader,
+                epochs=spec.epochs, lr=spec.lr, device=device, dtype=dtype,
+                eval_callback=contrastive_eval_callback if args.eval_every > 0 else None,
+            )
 
             # Evaluate (window-level)
-            results = evaluate_contrastive(
+            results = eval_state["results"] or evaluate_contrastive(
                 gcms_encoder, sensor_encoder,
                 gcms_data=gcms_scaled,                               # (N_g, Dg)
                 sensor_data=torch.from_numpy(Xte_np),           # (N_s, T, C)
@@ -687,7 +759,7 @@ def main():
             print("\nChannel ablation (Δacc@1, larger = more important):")
             for name, d in drops:
                 print(f"  {name:>8s}: +{d:.2f} pts")
-        else:
+        elif spec.contrastive and args.eval_every <= 0:
             spec_csv.write(stage="eval_contrastive", acc1=results.get("acc@1"), acc5=results.get("acc@5"), extra = json.dumps({
                 "per_category": results.get("per_category", {}),
                 "fft": getattr(spec, "fft", False),
@@ -697,11 +769,8 @@ def main():
 
             append_results_jsonl(
                 run_dir, spec, results=results,
-                dataset={"train_windows": int(Xtr_np.shape[0]),
-                        "test_windows": int(Xte_np.shape[0]),
-                        "T": int(Xtr_np.shape[1]), "C": int(Xtr_np.shape[2]),
-                        "classes": int(K)},
-                checkpoint=str((Path(args.save_dir) / f"{run_name}.pt").resolve())
+                dataset=dataset_info,
+                checkpoint=checkpoint_path
             )
 
 if __name__ == "__main__":

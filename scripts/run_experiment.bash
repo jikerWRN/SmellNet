@@ -18,7 +18,7 @@ for lr in 0.0003 0.001 0.003; do
           --models "$m" --contrastive on --gradients "$g" --window-sizes "$w" \
           --seed "${seed}" \
           --epochs 90 --batch-size 32 --lr "$lr" \
-          --run-name-prefix "SEL_grad${g}_w100" \
+          --run-name-prefix "SEL_grad${g}_w${w}_lr${lr}" \
           --log-dir "./contrastive_runs_w${w}_seed${seed}"
       done
     done
