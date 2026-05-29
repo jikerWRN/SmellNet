@@ -1,0 +1,108 @@
+cd models                    
+python run.py \
+  --train-dir ../base_data/training \
+  --test-dir ../base_data/testing \
+  --real-test-dir ../base_data/testing \
+  --gcms-csv ../gcms_processed/gcms_food_vectors.csv \
+  --models transformer \
+  --epochs 90 \
+  --batch-size 32 \
+  --lr 0.001
+
+==== Run: model=transformer | contrastive=False | grad=0 | window=100 ====
+train windows: (2649, 100, 6), test windows: (531, 100, 6), features per step: 6, classes: 50
+/home/yufei/anaconda3/envs/odor_new/lib/python3.12/site-packages/torch/nn/modules/transformer.py:379: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+Epoch 01 | loss 3.1103 | acc 14.72%
+Epoch 02 | loss 2.1917 | acc 31.56%
+Epoch 03 | loss 1.7518 | acc 43.34%
+Epoch 04 | loss 1.5164 | acc 49.64%
+Epoch 05 | loss 1.2851 | acc 55.83%
+Epoch 06 | loss 1.1185 | acc 61.91%
+Epoch 07 | loss 1.0563 | acc 65.01%
+Epoch 08 | loss 0.9549 | acc 67.31%
+Epoch 09 | loss 0.8553 | acc 70.71%
+Epoch 10 | loss 0.7754 | acc 73.20%
+Epoch 11 | loss 0.7050 | acc 75.80%
+Epoch 12 | loss 0.6778 | acc 76.44%
+Epoch 13 | loss 0.6273 | acc 78.71%
+Epoch 14 | loss 0.5563 | acc 80.63%
+Epoch 15 | loss 0.5252 | acc 82.26%
+Epoch 16 | loss 0.5348 | acc 81.50%
+Epoch 17 | loss 0.4822 | acc 83.58%
+Epoch 18 | loss 0.4612 | acc 83.58%
+Epoch 19 | loss 0.4768 | acc 84.14%
+Epoch 20 | loss 0.4532 | acc 84.75%
+Epoch 21 | loss 0.4397 | acc 84.86%
+Epoch 22 | loss 0.3839 | acc 86.26%
+Epoch 23 | loss 0.3941 | acc 86.86%
+Epoch 24 | loss 0.3787 | acc 87.58%
+Epoch 25 | loss 0.3695 | acc 87.05%
+Epoch 26 | loss 0.3546 | acc 88.34%
+Epoch 27 | loss 0.3487 | acc 88.41%
+Epoch 28 | loss 0.3184 | acc 89.51%
+Epoch 29 | loss 0.3221 | acc 88.98%
+Epoch 30 | loss 0.4009 | acc 87.43%
+Epoch 31 | loss 0.3107 | acc 89.92%
+Epoch 32 | loss 0.3243 | acc 89.66%
+Epoch 33 | loss 0.2907 | acc 91.09%
+Epoch 34 | loss 0.2914 | acc 90.83%
+Epoch 35 | loss 0.3121 | acc 90.79%
+Epoch 36 | loss 0.2894 | acc 90.41%
+Epoch 37 | loss 0.3124 | acc 89.73%
+Epoch 38 | loss 0.2815 | acc 91.54%
+Epoch 39 | loss 0.2853 | acc 91.17%
+Epoch 40 | loss 0.3105 | acc 91.62%
+Epoch 41 | loss 0.3040 | acc 90.41%
+Epoch 42 | loss 0.2849 | acc 91.77%
+Epoch 43 | loss 0.2769 | acc 92.00%
+Epoch 44 | loss 0.2735 | acc 91.47%
+Epoch 45 | loss 0.2423 | acc 92.71%
+Epoch 46 | loss 0.2642 | acc 92.56%
+Epoch 47 | loss 0.2533 | acc 92.34%
+Epoch 48 | loss 0.2564 | acc 92.68%
+Epoch 49 | loss 0.2397 | acc 92.79%
+Epoch 50 | loss 0.2656 | acc 91.69%
+Epoch 51 | loss 0.2347 | acc 93.43%
+Epoch 52 | loss 0.2992 | acc 92.11%
+Epoch 53 | loss 0.2476 | acc 92.98%
+Epoch 54 | loss 0.2070 | acc 93.96%
+Epoch 55 | loss 0.2538 | acc 93.81%
+Epoch 56 | loss 0.2228 | acc 93.70%
+Epoch 57 | loss 0.2353 | acc 93.24%
+Epoch 58 | loss 0.2407 | acc 93.13%
+Epoch 59 | loss 0.2157 | acc 94.11%
+Epoch 60 | loss 0.2129 | acc 94.11%
+Epoch 61 | loss 0.2578 | acc 93.51%
+Epoch 62 | loss 0.2810 | acc 93.28%
+Epoch 63 | loss 0.2787 | acc 92.87%
+Epoch 64 | loss 0.2154 | acc 94.04%
+Epoch 65 | loss 0.2086 | acc 94.60%
+Epoch 66 | loss 0.2082 | acc 94.41%
+Epoch 67 | loss 0.2417 | acc 93.77%
+Epoch 68 | loss 0.2074 | acc 94.30%
+Epoch 69 | loss 0.2296 | acc 94.19%
+Epoch 70 | loss 0.2014 | acc 94.07%
+Epoch 71 | loss 0.2439 | acc 94.00%
+Epoch 72 | loss 0.2125 | acc 94.90%
+Epoch 73 | loss 0.2156 | acc 95.43%
+Epoch 74 | loss 0.1829 | acc 95.21%
+Epoch 75 | loss 0.2460 | acc 94.87%
+Epoch 76 | loss 0.2454 | acc 94.98%
+Epoch 77 | loss 0.1999 | acc 94.98%
+Epoch 78 | loss 0.2104 | acc 94.98%
+Epoch 79 | loss 0.2063 | acc 94.56%
+Epoch 80 | loss 0.2725 | acc 94.41%
+Epoch 81 | loss 0.2411 | acc 94.60%
+Epoch 82 | loss 0.2462 | acc 94.49%
+Epoch 83 | loss 0.2350 | acc 94.41%
+Epoch 84 | loss 0.1562 | acc 95.96%
+Epoch 85 | loss 0.2074 | acc 95.39%
+Epoch 86 | loss 0.1969 | acc 94.41%
+Epoch 87 | loss 0.1949 | acc 95.32%
+Epoch 88 | loss 0.2359 | acc 95.28%
+Epoch 89 | loss 0.2317 | acc 94.41%
+Epoch 90 | loss 0.1701 | acc 95.89%
+{'acc@1': 33.15, 'acc@5': 73.82, 'precision_macro': 34.54, 'recall_macro': 33.88, 'f1_macro': 30.92, 'per_category': {'Fruits': {'n': 105, 'acc@1': 48.57142857142857, 'acc@5': 82.85714285714286}, 'Herbs': {'n': 107, 'acc@1': 28.037383177570092, 'acc@5': 56.074766355140184}, 'Nuts': {'n': 113, 'acc@1': 27.43362831858407, 'acc@5': 85.84070796460178}, 'Spices': {'n': 104, 'acc@1': 33.65384615384615, 'acc@5': 75.0}, 'Vegetables': {'n': 102, 'acc@1': 28.431372549019606, 'acc@5': 68.62745098039215}}}
+
+
