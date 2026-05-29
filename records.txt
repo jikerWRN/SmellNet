@@ -1,3 +1,15 @@
+
+
+不同的随机数种子，对acc@5的结果有一定的影响
+42
+'acc@1': 59.16, 'acc@5': 86.06, 'precision_macro': 62.69, 'recall_macro': 59.31, 'f1_macro': 58.1, 'topk_idx': array([[28,  3, 48, 13, 29],
+
+3407
+'acc@1': 59.16, 'acc@5': 83.27, 'precision_macro': 59.23, 'recall_macro': 59.26, 'f1_macro': 56.64, 'topk_idx': array([[48, 28,  3, 13, 29],
+------------------------------------------------------
+
+
+
 cd models                    
 python run.py \
   --train-dir ../base_data/training \
